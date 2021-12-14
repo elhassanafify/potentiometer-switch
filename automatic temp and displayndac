@@ -1,0 +1,174 @@
+// Keypad module connections
+char  keypadPort at PORTB;
+// End Keypad module connections
+
+// LCD module connections
+sbit LCD_RS at LATC4_bit;
+sbit LCD_EN at LATC5_bit;
+sbit LCD_D4 at LATC0_bit;
+sbit LCD_D5 at LATC1_bit;
+sbit LCD_D6 at LATC2_bit;
+sbit LCD_D7 at LATC3_bit;
+
+sbit LCD_RS_Direction at TRISC4_bit;
+sbit LCD_EN_Direction at TRISC5_bit;
+sbit LCD_D4_Direction at TRISC0_bit;
+sbit LCD_D5_Direction at TRISC1_bit;
+sbit LCD_D6_Direction at TRISC2_bit;
+sbit LCD_D7_Direction at TRISC3_bit;
+// End LCD module connections
+
+
+
+
+void main() {                   //run once
+unsigned short kp,Txt[14];            //keypad value as kp
+  unsigned int Temp_Ref ;      //  Reference Temperature
+  unsigned char inTemp;                //
+  unsigned int temp;                     //read temp value integer
+  float mV, ActualTemp;                 //assign mv & sensor temp
+
+  ANSELC = 0;                 // Configure PORTC as digital I/O
+  ANSELB = 0;                 // Configure PORTB as digital I/O
+  ANSELD = 0;                 // Configure PORTD as digital I/O
+  TRISA0_bit = 1;              //Configure AN0 (RA0) as input
+  TRISC = 0;                  //PORTC are outputs (LCD)
+  TRISD0_bit=0;               //RD0 is output (Heater)
+  TRISD1_bit=0;               //RD1 is output (Fan)
+  TRISD3_bit=0;               //RD3 is output (LED)
+  TRISB3_bit=0;               //RB3 is output (Unconnected)
+  LATB.B3=0;                 //Drive low RB3
+
+  Keypad_Init();               // Initialize Keypad
+  Lcd_Init();                  // Initialize LCD
+  Sound_Init(&PORTD, 2);     // Initialize the pin RD2 for playing sound
+
+  Lcd_Cmd(_LCD_CLEAR);                     // Clear display
+  Lcd_Cmd(_LCD_CURSOR_OFF);                // Cursor off
+  Lcd_Out(1, 4, "Automatic");
+  Lcd_Out(2, 2, "Temp Control");
+  delay_ms(2000);                          //2s delay
+
+  HEATER = OFF;                       //heater off initially
+  FAN = OFF;                           //fan off initially
+
+ //ON startup, read the Referance Temperature from EEPROM or the Keypad
+ //Read Temp Ref from EEPROM
+        Temp_Ref= EEPROM_Read(0x02); // Read data from EEPROM address 2 and store it in Temp_Ref variable
+        if ((Temp_Ref > 0) & (Temp_Ref < 100))        // eeprom read condition
+    {
+      goto START_PROGRAM ;
+    }
+    else {
+
+        START:
+       Lcd_Cmd(_LCD_CLEAR);                     // Clear display
+       Lcd_Out(1, 1, "Enter Temp Ref");           //lcd out test abd position
+       Temp_Ref=0;
+        Lcd_Out(2, 1, "Temp Ref: ");
+        while(1)
+        {
+        //Setup new Temp Ref
+         do
+           kp = Keypad_Key_Click();      // Store key code in kp variable and read what was clicked
+         while (!kp);
+         if ( kp == ENTER )break;              //when enter is clicked exit loop
+         if (kp > 3 && kp < 8) kp = kp-1;   //kp value minus 1 bec of keypad setup   bec 4x3 keypad is used
+         if (kp > 8 && kp < 12) kp = kp-2;   //kp value minus 1 bec of keypad setup  bec 4x3 keypad is used
+         if (kp ==14)kp = 0;
+         if ( kp == CLEAR )goto START;         //if clear value is clicked it will go back to start function
+         Lcd_Chr_Cp(kp + '0');                  //write character current position automatically
+         Temp_Ref =(10*Temp_Ref) + kp;              //10 plus key pressed to set temp ref
+    }
+
+       }
+
+      Lcd_Cmd(_LCD_CLEAR);          // Clear display
+      Lcd_Out(1, 1, "Temp Ref: ");
+      intToStr( Temp_Ref,Txt);      //Convert to String
+      inTemp=Ltrim(Txt);
+      Lcd_Out_CP(inTemp);          //Display Ref Temp
+
+      EEPROM_Write(0x02,Temp_Ref); // Write Temp_Ref at address 2 of EEPROM
+
+      Lcd_Out(2, 1, "Press # to Cont.");
+      //Wait until # is pressed
+      kp =0;
+      while(kp!=ENTER)
+      {
+         do
+           kp = Keypad_Key_Click();  // Store key code in kp variable
+         while(!kp);
+      }
+
+      START_PROGRAM:
+
+   Lcd_Cmd(_LCD_CLEAR);          // Clear display
+
+   Lcd_Out(1, 1, "Temp Ref: ");
+   Lcd_Chr(1,15,223);                 // 223 is degree sign
+                                    //   char code for degree
+  Lcd_Chr(1,16,'C');                // Display "C" for Celsius
+
+  //Program loop
+  while(1) {
+    //Display Referance Temperature and Actual Temperature
+     temp = ADC_Read(0);               //Read temperature from AN0
+     mV = temp * 5000.0/1023.0;        //Convert to mV
+     ActualTemp = mV/10.0 ;             // Convert to degrees Celcius   bec lm35 prod 10mv per deg celcius
+     intToStr( Temp_Ref,Txt);         //Convert to String
+     inTemp=Ltrim(Txt);
+     //Lcd_Out(1, 1, "Temp Ref: ");
+     Lcd_Out(1, 11, inTemp);        //Display Ref Temp
+     Lcd_Out(2, 1, "Temp= ");
+     FloatToStr(ActualTemp,Txt);    //Convert to string
+     Txt[4] = 0;            //limit character value to 4 charachters
+     Lcd_Out(2,7,Txt);
+     Lcd_Out(2,12,"   ");
+
+     //Compare ref temp with actual emp
+      if (Temp_Ref >  ActualTemp)  //If Temp Ref is greater than actual Temp, Switch ON Heater  (cold room)
+      {
+      HEATER = ON,
+      FAN = OFF;
+      }
+       if (Temp_Ref <  ActualTemp)  //If Temp Ref is less than actual Temp, Switch ON Fan    (hot room)
+      {
+      HEATER = OFF,
+      FAN = ON;
+
+      }
+      if (Temp_Ref ==  ActualTemp)  //If Temp Ref is equal to actual Temp, Switch OFF Fan and Heater
+      {
+      HEATER = OFF,
+      FAN = OFF;
+      }
+
+        //Check if the '*' key is pressed
+
+         kp = Keypad_Key_Press(); // Store key code in kp variable
+         if ( kp == CLEAR )
+         {
+         delay_ms(3000);          //3s delay
+         kp = Keypad_Key_Press(); // Store key code in kp variable
+         if ( kp == CLEAR )
+         {
+         goto START;
+         }
+         }
+
+         //Sound the buzzer NOTE NOT USED IN VIDEO BEC. NO TIME AND ELECTRICITY AND INTERNET ISSUES
+      if (ActualTemp >=  40)  //If Temp reaches critical temperature of 40.
+      {
+       Sound_Play(880, 300); // Play sound at 880Hz for 300ms
+
+      LED = ~LED ;         //Blink LED
+      delay_ms(200);          //200ms delay
+      }
+      else
+      {
+      LED = OFF;
+      }
+  }
+
+}
